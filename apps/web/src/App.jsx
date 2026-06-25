@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useConnectionStatus } from "./hooks/useConnectionStatus";
-import { getTodos, createTodo, updateTodo } from "./lib/todoApi";
-import { getQueue } from "./lib/queueDB";
-import { PiWifiHigh, PiWifiSlash, PiCloudCheck, PiCloudX } from "react-icons/pi";
+import { getTodos, createTodo, updateTodo, deleteTodo } from "./lib/todoApi";
+import { getQueue, removeFromQueue } from "./lib/queueDB";
+import { PiWifiHigh, PiWifiSlash, PiCloudCheck, PiCloudX, PiTrash } from "react-icons/pi";
 import { AiOutlineLoading3Quarters } from "react-icons/ai";
 import "./App.css";
 
@@ -12,6 +12,8 @@ function App() {
   const [todos, setTodos] = useState([]);
   const [queue, setQueue] = useState([]);
   const [input, setInput] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
 
   useEffect(() => {
     const handler = (e) => {
@@ -39,6 +41,34 @@ function App() {
     return () => window.removeEventListener("queue-updated", handler);
   }, []);
 
+  useEffect(() => {
+    if (isApiReachable === true && queue.length > 0 && !isSyncingRef.current) {
+      syncQueue(queue);
+    }
+  }, [isApiReachable, queue]);
+
+  async function syncQueue(pendingQueue) {
+    isSyncingRef.current = true;
+    setIsSyncing(true);
+    for (const item of pendingQueue) {
+      try {
+        const hasBody = item.data && Object.keys(item.data).length > 0;
+        const res = await fetch(item.endpoint, {
+          method: item.method,
+          headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+          body: hasBody ? JSON.stringify(item.data) : undefined,
+        });
+        if (res.ok) await removeFromQueue(item.id);
+      } catch {
+        // mantém na fila se falhar
+      }
+    }
+    const fresh = await getTodos();
+    setTodos(fresh);
+    isSyncingRef.current = false;
+    setIsSyncing(false);
+  }
+
   async function handleAdd(e) {
     e.preventDefault();
     if (!input.trim()) return;
@@ -47,9 +77,14 @@ function App() {
     setInput("");
   }
 
-  async function handleDone(id) {
-    const updated = await updateTodo(id);
+  async function handleDone(id, currentDone) {
+    const updated = await updateTodo(id, !currentDone);
     if (updated) setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
+  }
+
+  async function handleDelete(id) {
+    await deleteTodo(id);
+    setTodos((prev) => prev.filter((t) => t.id !== id));
   }
 
   return (
@@ -89,9 +124,10 @@ function App() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="New todo..."
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ccc", fontSize: 14 }}
+                disabled={isSyncing}
+                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #ccc", fontSize: 14, opacity: isSyncing ? 0.5 : 1 }}
               />
-              <button type="submit">Add</button>
+              <button type="submit" disabled={isSyncing}>Add</button>
             </form>
 
             <ul style={{ listStyle: "none", padding: 0, margin: 0, minWidth: 280 }}>
@@ -103,14 +139,20 @@ function App() {
                   <input
                     type="checkbox"
                     checked={t.done}
-                    disabled={t.done}
-                    onChange={() => handleDone(t.id)}
-                    style={{ cursor: t.done ? "default" : "pointer" }}
+                    disabled={isSyncing}
+                    onChange={() => handleDone(t.id, t.done)}
+                    style={{ cursor: isSyncing ? "default" : "pointer" }}
                   />
-                  <span style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "#9ca3af" : "inherit" }}>
+                  <span style={{ flex: 1, textDecoration: t.done ? "line-through" : "none", color: t.done ? "#9ca3af" : "inherit" }}>
                     {t.todo}
                   </span>
-                  {t.pending && <span style={{ fontSize: 11, color: "#b45309", background: "#fef9c3", borderRadius: 4, padding: "1px 5px" }}>pendente</span>}
+                  <button
+                    onClick={() => handleDelete(t.id)}
+                    disabled={isSyncing}
+                    style={{ background: "none", border: "none", cursor: isSyncing ? "default" : "pointer", color: "#dc2626", padding: 2 }}
+                  >
+                    <PiTrash size={16} />
+                  </button>
                 </li>
               ))}
             </ul>

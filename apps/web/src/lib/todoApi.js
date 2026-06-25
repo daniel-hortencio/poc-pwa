@@ -44,9 +44,13 @@ export async function createTodo(todo) {
   }
 }
 
-export async function updateTodo(id) {
+export async function updateTodo(id, done) {
   try {
-    const res = await fetch(`${API_URL}/todo?id=${id}`, { method: "PATCH" });
+    const res = await fetch(`${API_URL}/todo?id=${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ done }),
+    });
     const updated = await res.json();
     notifyApiStatus(true);
     const todos = await getLocalTodos();
@@ -56,9 +60,26 @@ export async function updateTodo(id) {
     console.log("[updateTodo] API unavailable:", err);
     notifyApiStatus(false);
     const todos = await getLocalTodos();
-    const optimistic = todos.map((t) => (t.id === id ? { ...t, done: true } : t));
+    const optimistic = todos.map((t) => (t.id === id ? { ...t, done } : t));
     await saveLocalTodos(optimistic);
-    await addToQueue({ endpoint: `${API_URL}/todo?id=${id}`, method: "PATCH", data: {} });
+    await addToQueue({ endpoint: `${API_URL}/todo?id=${id}`, method: "PATCH", data: { done } });
     return optimistic.find((t) => t.id === id);
+  }
+}
+
+export async function deleteTodo(id) {
+  try {
+    await fetch(`${API_URL}/todo?id=${id}`, { method: "DELETE" });
+    notifyApiStatus(true);
+    const todos = await getLocalTodos();
+    await saveLocalTodos(todos.filter((t) => t.id !== id));
+    return true;
+  } catch (err) {
+    console.log("[deleteTodo] API unavailable:", err);
+    notifyApiStatus(false);
+    const todos = await getLocalTodos();
+    await saveLocalTodos(todos.filter((t) => t.id !== id));
+    await addToQueue({ endpoint: `${API_URL}/todo?id=${id}`, method: "DELETE", data: {} });
+    return true;
   }
 }
